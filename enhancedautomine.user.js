@@ -5,7 +5,7 @@
 // @description   Automatically mines the Underground with Bombs. Features adjustable settings as well.
 // @copyright     https://github.com/Ephenia
 // @license       GPL-3.0 License
-// @version       2.1
+// @version       2.2
 
 // @homepageURL   https://github.com/Ephenia/Pokeclicker-Scripts/
 // @supportURL    https://github.com/Ephenia/Pokeclicker-Scripts/issues
@@ -34,9 +34,10 @@ var itemThreshold;
 
 function initAutoMine() {
     if (mineState) {
+        let locatedRewards = [];
         autoMineTimer = setInterval(function () {
-            doAutoMine();
-        }, 1000);
+            doAutoMine(locatedRewards);
+        }, 500);
     }
 
     setThreshold = +setThreshold;
@@ -59,6 +60,8 @@ function initAutoMine() {
 </select>
 <div id="item-threshold-input" class="col-12 col-md-2 btn-secondary"><img id="treasure-image" src="assets/images/currency/money.svg" height="25px">
 <input title="Skips layers with fewer target items than this value." type="text" id="item-threshold"></div>`
+    /* <div id="skip-input" class="col-12 col-md-3 btn-secondary">
+    <input title="Automatically skips layers with fewer items than this value." type="text" id="auto-skip"></div> */
     document.querySelectorAll('#mineBody + div')[0].prepend(minerHTML);
     $("#auto-mine-start").unwrap();
     document.getElementById('small-restore').value = setThreshold.toLocaleString('en-US');
@@ -109,8 +112,9 @@ function startAutoMine(event) {
     mineState ? element.classList.replace('btn-danger', 'btn-success') : element.classList.replace('btn-success', 'btn-danger');
     element.textContent = `Auto Mine [${mineState ? 'ON' : 'OFF'}]`;
     if (mineState) {
+        let locatedRewards = [];
         autoMineTimer = setInterval(function () {
-            doAutoMine();
+            doAutoMine(locatedRewards);
         }, 1000); // Happens every 1 second
     } else {
         clearTimeout(busyMining);
@@ -120,7 +124,7 @@ function startAutoMine(event) {
     localStorage.setItem('autoMineState', mineState);
 }
 
-function doAutoMine() {
+function doAutoMine(locatedRewards) {
     let getEnergy = Math.floor(App.game.underground.energy);
     const getMoney = App.game.wallet.currencies[GameConstants.Currency.money]();
     const buriedItems = Mine.itemsBuried();
@@ -134,6 +138,7 @@ function doAutoMine() {
     const surveyResult = Mine.surveyResult();
     let treasureAmount;
     if (Mine.loadingNewLayer) {
+        locatedRewards.length = 0;;
         // Do nothing while the new layer is loading
         return;
     }
@@ -144,16 +149,16 @@ function doAutoMine() {
             treasureAmount = +re.exec(surveyResult)[1];
             // Count fossil pieces as fossils
             if (treasureHunter == 0) {
-              re = new RegExp(`Fossil Pieces: (\d+)`);
-              treasureAmount += +re.exec(surveyResult)[1];
-            }
+                re = new RegExp(`Fossil Pieces: (\d+)`);
+                treasureAmount += +re.exec(surveyResult)[1];
+                }
         } catch (err) {
             treasureAmount = 0;
         }
     }
     if (treasureHunting && !surveyResult) {
         // Survey the layer
-        mineMain();
+        mineMain(locatedRewards);
     } else if (treasureHunting && treasureAmount < itemThreshold && skipsRemain > 0) {
         // Too few of the desired treasure type, skip
         resetLayer();
@@ -162,7 +167,7 @@ function doAutoMine() {
         resetLayer();
     } else {
         // Either the layer meets requirements or we're out of skips
-        mineMain();
+        mineMain(locatedRewards);
     }
     if (layersMined != App.game.statistics.undergroundLayersMined()) {
         if (sellTreasureState) {
@@ -172,9 +177,9 @@ function doAutoMine() {
         layersMined = JSON.parse(localStorage.getItem('undergroundLayersMined'));
     }
 
-    function mineMain() {
+    function mineMain(locatedRewards) {
         if (smallRestoreState) {
-            if ((getCost == 30000) && (smallRestore == 0) && (getMoney >= setThreshold + 30000)) {
+            if ((getCost == 30000) && (getMoney >= setThreshold + 30000)) {
                 ItemList["SmallRestore"].buy(1);
             }
             if (getEnergy < 15) {
@@ -183,7 +188,9 @@ function doAutoMine() {
                 } else if (mediumRestore > 0) {
                     ItemList["MediumRestore"].use();
                 } else {
-                    ItemList["SmallRestore"].use();
+                    while(+player.itemList["SmallRestore"]() >= 1 && Math.floor(App.game.underground.energy) < 125){
+                        ItemList["SmallRestore"].use();
+                    }
                 }
                 // Refresh energy count so we can use it immediately
                 getEnergy = Math.floor(App.game.underground.energy);
@@ -204,6 +211,7 @@ function doAutoMine() {
                 let mineBody = document.querySelector(`div[id="mineBody"]`);
                 let mineGrid = mineBody.children;
                 let rewards = mineBody.querySelectorAll('.mineReward');
+
                 for (var ii = 0; ii < rewards.length; ii++) {
                     var reward = rewards[ii];
                     var rewardParent = reward.parentNode;
@@ -238,22 +246,32 @@ function doAutoMine() {
                         default:
                             console.log("Switch statement fallthrough. Suggests unexpected class structure.")
                     }
-
-                    for (let i = 0; i < size[1]; i++) {
-                        for (let j = 0; j < size[0]; j++) {
-                            //ri, pos[1], and i are vertical - rj, pos[0], and j are horizontal
-                            const verticalCoordinate = ri - pos[1] + i;
-                            const horizontalCoordinate = rj - pos[0] + j;
-                            if (mineGrid[verticalCoordinate] && mineGrid[verticalCoordinate].children[horizontalCoordinate]) {
-                                let selectedTile = mineGrid[verticalCoordinate].children[horizontalCoordinate];
-                                //highlights entire reward before chiseling for testing purposes
-                                // selectedTile.style.filter = "sepia(50%) saturate(120%) brightness(80%) hue-rotate(320deg)";
-                                if (!selectedTile.className.includes("Reward") &&
-                                    !selectedTile.className.includes("rock0")
-                                ) {
-                                    Mine.click(verticalCoordinate, horizontalCoordinate);
-                                    getEnergy -= 1;
-                                    minedThisInterval = true;
+                    const verticalOrigin = ri - pos[1];
+                    const horizontalOrigin = rj - pos[0];
+                    const coordinateString = `${verticalOrigin}-${horizontalOrigin}`
+                    if (locatedRewards.length >= buriedItems || !locatedRewards.includes(coordinateString)) {
+                        for (let i = 0; i < size[1]; i++) {
+                            for (let j = 0; j < size[0]; j++) {
+                                //ri, pos[1], and i are vertical - rj, pos[0], and j are horizontal
+                                const verticalCoordinate = verticalOrigin + i;
+                                const horizontalCoordinate = horizontalOrigin + j;
+                                if (mineGrid[verticalCoordinate] && mineGrid[verticalCoordinate].children[horizontalCoordinate]) {
+                                    let selectedTile = mineGrid[verticalCoordinate].children[horizontalCoordinate];
+                                    //highlights entire reward before chiseling for testing purposes
+                                    // selectedTile.style.filter = "sepia(50%) saturate(120%) brightness(80%) hue-rotate(320deg)";
+                                    //we will store the origin point as the identifier of each object. once we locate all of them, we chisel
+                                    if (i == 0 && j == 0 && !locatedRewards.includes(coordinateString)) {
+                                        locatedRewards.push(coordinateString);
+                                        selectedTile.style.filter = "sepia(50%) saturate(120%) brightness(80%) hue-rotate(320deg)";
+                                    }
+                                    if (!selectedTile.className.includes("Reward") &&
+                                        !selectedTile.className.includes("rock0") &&
+                                        locatedRewards.length >= buriedItems
+                                    ) {
+                                        Mine.click(verticalCoordinate, horizontalCoordinate);
+                                        getEnergy -= 1;
+                                        minedThisInterval = true;
+                                    }
                                 }
                             }
                         }
@@ -268,6 +286,7 @@ function doAutoMine() {
     }
     function resetLayer() {
         if (!Mine.loadingNewLayer) {
+            locatedRewards.length = 0;
             Mine.loadingNewLayer = true;
             setTimeout(Mine.completed, 1500);
             //GameHelper.incrementObservable(App.game.statistics.undergroundLayersMined);
@@ -348,6 +367,26 @@ function loadScript() {
         initAutoMine()
         return result
     }
+}
+
+var scriptName = 'enhancedautomine'
+
+if (document.getElementById('scriptHandler') != undefined) {
+    var scriptElement = document.createElement('div')
+    scriptElement.id = scriptName
+    document.getElementById('scriptHandler').appendChild(scriptElement)
+    if (localStorage.getItem(scriptName) != null) {
+        if (localStorage.getItem(scriptName) == 'true') {
+            loadScript()
+        }
+    }
+    else {
+        localStorage.setItem(scriptName, 'true')
+        loadScript()
+    }
+}
+else {
+    loadScript();
 }
 
 function validParse(key) {
